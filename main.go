@@ -1,16 +1,18 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
 	"github.com/google/go-github/github"
 	"github.com/jessevdk/go-flags"
 	"github.com/uber-go/zap"
-	"golang.org/x/oauth2"
+	"golang.org/x/crypto/ssh/terminal"
 	"net/url"
 	"os"
+	"syscall"
 )
 
 var opts struct {
-	Token     string `short:"t" long:"token" env:"GITHUB_TOKEN" description:"github oauth token" required:"true"`
 	Simulate  bool   `short:"s" long:"simulate" description:"don't make any subscription changes"`
 	GithubURL string `long:"hub-url" env:"GITHUB_URL" description:"github url (such as your enterprise github url)" default:"https://api.github.com"`
 }
@@ -28,7 +30,8 @@ func init() {
 }
 
 func main() {
-	client := getGithubClient()
+	user, pass := getCredentials()
+	client := getGithubClient(user, pass)
 	unsubscribeLoop(client)
 }
 
@@ -51,11 +54,31 @@ func unsubscribeLoop(client *github.Client) {
 	}
 }
 
-func getGithubClient() *github.Client {
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: opts.Token})
-	tc := oauth2.NewClient(oauth2.NoContext, ts)
+func getCredentials() (user, pass string) {
+	inputReader := bufio.NewReader(os.Stdin)
+	fmt.Print("User: ")
+	user, err := inputReader.ReadString('\n')
+	if err != nil {
+		logger.Error("unable to read username", zap.Error(err))
+		os.Exit(1)
+	}
 
-	client := github.NewClient(tc)
+	fmt.Print("Password: ")
+	passBytes, err := terminal.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		logger.Error("unable to read password", zap.Error(err))
+		os.Exit(1)
+	}
+	pass = string(passBytes)
+	return
+}
+
+func getGithubClient(user, pass string) *github.Client {
+	tc := github.BasicAuthTransport{
+		Username: user,
+		Password: pass,
+	}
+	client := github.NewClient(tc.Client())
 	baseUrl, err := url.Parse(opts.GithubURL)
 	if err != nil {
 		logger.Error("unable to parse provided url", zap.String("github url", opts.GithubURL), zap.Error(err))
